@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "governed"
+version = "0.2.0"
+description = "A small, explicit framework for goal-directed LLM agents: plan, act, observe, iterate."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["llm", "agent", "tools", "autonomous", "guardrails", "anthropic", "openai", "gemini"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+# The core has exactly one runtime dependency. That is deliberate.
+dependencies = ["pydantic>=2.6,<3"]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+openai = ["openai>=1.40"]
+gemini = ["google-genai>=1.0"]
+data = ["pandas>=2.0", "pyarrow>=14"]
+yaml = ["pyyaml>=6"]          # richer skill frontmatter; a mini-parser is built in
+all = ["governed[anthropic,openai,gemini,data,yaml]"]
+dev = ["governed[all]", "pytest>=8", "pytest-cov", "mypy>=1.8", "ruff>=0.4"]
+
+[project.scripts]
+governed = "governed.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/poorani/governed"
+Issues = "https://github.com/poorani/governed/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/governed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 95
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# B008: default-argument callables (e.g. ToolContext.approve) are deliberate here.
+# RUF022: __all__ lists are grouped by category with comments, not alphabetized.
+ignore = ["B008", "RUF022"]
+
+[tool.mypy]
+# Not pinned to 3.10 (the package's minimum): recent numpy's bundled stubs use
+# 3.12-only syntax, and pinning the checker's parse-version below what's
+# installed breaks stub parsing. Our own code targets 3.10 regardless -- this
+# setting only controls what mypy's parser accepts, not what we write.
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# Optional deps (pandas, PyYAML) are imported lazily behind feature flags and
+# only when present; don't require their (occasionally version-mismatched)
+# stub packages to typecheck the core.
+module = ["pandas", "pandas.*", "yaml", "yaml.*", "numpy", "numpy.*", "google", "google.genai"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.coverage.run]
+source = ["src/governed"]
+
+[tool.coverage.report]
+# A floor, not a target -- current is ~90%. Set below that on purpose, so
+# ordinary day-to-day variance doesn't flap CI; it exists to catch an actual
+# drop (a new module or code path added with no test at all), not to nag
+# about the last few points. Only takes effect when `--cov` is passed
+# explicitly (CI's pytest step); plain `pytest` -- what CONTRIBUTING.md and
+# every partial/filtered local run use -- is completely unaffected, since
+# coverage isn't even measured without `--cov`.
+fail_under = 85
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.$",
+]

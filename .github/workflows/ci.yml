@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch/PR cancels the still-running check for the
+# previous one -- no point finishing a lint run for a commit that's already
+# been superseded.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (core + dev + all optional providers)
+        run: pip install -e '.[dev]'
+
+      # Every check below is exactly what README's "Contributing" section
+      # asks a human to run before submitting -- CI just enforces it.
+      - name: Lint (ruff check)
+        run: ruff check .
+
+      - name: Format check (ruff format)
+        run: ruff format --check .
+
+      - name: Type-check (mypy --strict, src only)
+        run: mypy src
+
+      # --cov turns on coverage measurement and, via [tool.coverage.report]
+      # fail_under in pyproject.toml, gates on it -- plain `pytest` (every
+      # local run, per CONTRIBUTING.md) has no coverage overhead and isn't
+      # gated at all; only this explicit, full-suite CI invocation is.
+      - name: Test (offline -- no network, no API key)
+        run: pytest --cov=governed --cov-report=term-missing
+
+  dependency-audit:
+    name: Dependency & supply-chain audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # pip itself ships with the runner image and is often behind -- audit
+      # it too, but upgrade first so a stale *pip* CVE doesn't fail the job
+      # for a package governed doesn't even declare a dependency on.
+      - name: Upgrade pip
+        run: pip install --upgrade pip
+
+      # Audits the full dependency tree governed can pull in -- core plus
+      # every optional provider/extra -- not just what a bare install
+      # resolves, since [all]'s pins are what most deployments actually run.
+      - name: Install (core + all optional providers, no dev tooling)
+        run: pip install -e '.[all]' pip-audit cyclonedx-bom
+
+      - name: Audit installed dependencies for known vulnerabilities
+        run: pip-audit --strict
+
+      # A framework whose pitch is auditability should be able to answer
+      # "what's actually in this build" for itself -- a CycloneDX SBOM of
+      # the exact environment `[all]` resolves to, attached to the run so
+      # it's inspectable (and diffable, run to run) without reproducing the
+      # install locally.
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cyclonedx-py environment --pyproject pyproject.toml \
+            --output-format JSON --output-file sbom.json "$(which python)"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 90
