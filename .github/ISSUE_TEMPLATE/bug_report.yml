@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in governed itself is broken or behaves unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a security vulnerability instead? Use [private vulnerability reporting](../../security/advisories/new) rather than a public issue — see [SECURITY.md](https://github.com/poorani/governed/blob/main/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: governed version
+      description: Output of `python -c "import governed; print(governed.__version__)"`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.12.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected instead, and what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A small, self-contained snippet that reproduces the issue. Issues without a reproduction are much harder to act on.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback (if any)
+      render: shell
