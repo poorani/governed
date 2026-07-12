@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Runtime and optional-provider dependencies declared in pyproject.toml.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Actions pinned in .github/workflows/*.yml (actions/checkout, setup-python).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

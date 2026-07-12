@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+.venv/
+venv/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# runtime artifacts from examples/tests
+examples/workspace/
+examples/traces/
+examples/.agentloop/
+workspace/
+traces/
+.agentloop/
+
+.DS_Store
