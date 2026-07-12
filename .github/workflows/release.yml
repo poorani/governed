@@ -1,0 +1,51 @@
+name: Release
+
+# Publishes to PyPI on every tag matching v*.*.* (e.g. v0.2.0). Uses PyPI
+# Trusted Publishing (OIDC) -- no API token stored in this repo. The PyPI
+# project must have this repo/workflow registered as a trusted publisher
+# first (see CONTRIBUTING.md / repo docs for the one-time setup).
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build
+        run: pip install --upgrade build
+
+      - name: Build
+        run: python -m build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for OIDC trusted publishing
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
