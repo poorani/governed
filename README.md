@@ -1,3 +1,5 @@
+![governed](https://raw.githubusercontent.com/poorani/governed/main/assets/governed_lockup.png)
+
 # governed
 
 A small, explicit framework for goal-directed LLM agents.
