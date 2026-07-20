@@ -16,12 +16,22 @@ Participation in this project — issues, PRs, discussions — is governed by th
 
 ```bash
 git clone https://github.com/poorani/governed && cd governed
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
 `[dev]` pulls in every optional provider extra (`anthropic`, `openai`,
 `gemini`, `data`, `yaml`) plus `pytest`, `mypy`, and `ruff` — the same set CI
-installs, so a clean local run means a clean CI run.
+installs, so a clean local run means a clean CI run. Create and activate the
+venv first — installing into the wrong environment (or a globally installed
+`pytest` outside any venv) is the most common source of the failure below.
+
+If `pytest` fails immediately with `ImportError while loading conftest
+'.../tests/conftest.py'` and `ModuleNotFoundError: No module named
+'governed'`, the package itself isn't installed in the environment `pytest`
+is running in — `tests/conftest.py` imports `governed.tools.base` directly,
+so collection fails before any test runs. Re-run `pip install -e '.[dev]'`
+with the same venv active that you're invoking `pytest` from.
 
 ## Before opening a PR
 
