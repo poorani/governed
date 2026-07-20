@@ -8,6 +8,7 @@ across vendors, not just within the Anthropic-shaped or OpenAI-shaped family.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Any
 
@@ -16,6 +17,23 @@ from .base import LLMClient, LLMResponse, Message, ToolCall, ToolChoice, Usage
 __all__ = ["GeminiClient"]
 
 _CHOICE_MAP = {"auto": "AUTO", "required": "ANY", "none": "NONE"}
+
+#: 429 is a `ClientError` (4xx) in google-genai's status-code split, but it
+#: means "back off", not "bad request" -- worth retrying unlike other 4xxs.
+_RETRYABLE_CLIENT_CODES = {429}
+
+try:
+    from google.genai.errors import ClientError, ServerError
+except ImportError:  # google-genai not installed; only real API calls raise these,
+    ServerError = ClientError = ()  # type: ignore[assignment,misc]  # so nothing to catch
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, ServerError):
+        return True
+    if isinstance(exc, ClientError):
+        return getattr(exc, "code", None) in _RETRYABLE_CLIENT_CODES
+    return False
 
 
 class GeminiClient(LLMClient):
@@ -26,8 +44,16 @@ class GeminiClient(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
         client: Any = None,
+        max_retries: int = 2,
+        retry_backoff: float = 1.0,
     ) -> None:
         self.model = model
+        #: Gemini's backend returns transient 503/429s under load that the SDK's
+        #: own retry doesn't always absorb, and the agent loop above only retries
+        #: contract violations, not transport errors -- so this client retries
+        #: its own transient failures. `max_retries=0` disables it.
+        self.max_retries = max_retries
+        self.retry_backoff = retry_backoff
         if client is not None:
             self._client = client
             return
@@ -64,12 +90,19 @@ class GeminiClient(LLMClient):
                 "function_calling_config": {"mode": _CHOICE_MAP.get(tool_choice, "AUTO")}
             }
 
-        resp = self._client.models.generate_content(
-            model=self.model,
-            contents=_to_gemini_contents(messages),
-            config=config,
-        )
-        return _from_gemini_response(resp)
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self._client.models.generate_content(
+                    model=self.model,
+                    contents=_to_gemini_contents(messages),
+                    config=config,
+                )
+                return _from_gemini_response(resp)
+            except Exception as exc:
+                if attempt >= self.max_retries or not _is_retryable(exc):
+                    raise
+                time.sleep(self.retry_backoff * (2**attempt))
+        raise AssertionError("unreachable")  # loop always returns or raises
 
 
 def _to_gemini_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -79,12 +112,28 @@ def _to_gemini_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 {
                     "name": t["name"],
                     "description": t["description"],
-                    "parameters": t["input_schema"],
+                    "parameters": _clean_schema(t["input_schema"]),
                 }
                 for t in tools
             ]
         }
     ]
+
+
+def _clean_schema(schema: Any) -> Any:
+    """Strip ``additionalProperties`` from a pydantic-generated JSON Schema.
+
+    A ``dict[str, X]`` field (e.g. ``DataAnalysisTool``'s ``agg``) renders as
+    ``additionalProperties`` -- valid JSON Schema, and even a field
+    ``google-genai``'s own ``Schema`` type declares -- but the Gemini REST API
+    rejects it wherever it appears inside a nested ``anyOf`` branch. Drop it
+    recursively rather than special-case the one tool.
+    """
+    if isinstance(schema, dict):
+        return {k: _clean_schema(v) for k, v in schema.items() if k != "additionalProperties"}
+    if isinstance(schema, list):
+        return [_clean_schema(v) for v in schema]
+    return schema
 
 
 def _to_gemini_contents(messages: list[Message]) -> list[dict[str, Any]]:
@@ -104,9 +153,13 @@ def _to_gemini_contents(messages: list[Message]) -> list[dict[str, Any]]:
                 parts.append({"text": m.text})
             for tc in m.tool_calls:
                 call_names[tc.id] = tc.name
-                parts.append(
-                    {"function_call": {"id": tc.id, "name": tc.name, "args": tc.arguments}}
-                )
+                part: dict[str, Any] = {
+                    "function_call": {"id": tc.id, "name": tc.name, "args": tc.arguments}
+                }
+                signature = tc.meta.get("thought_signature")
+                if signature is not None:
+                    part["thought_signature"] = signature
+                parts.append(part)
             out.append({"role": "model", "parts": parts or [{"text": ""}]})
         else:
             parts = []
@@ -138,8 +191,10 @@ def _from_gemini_response(resp: Any) -> LLMResponse:
         fc = getattr(part, "function_call", None)
         if fc is not None:
             call_id = getattr(fc, "id", None) or f"{fc.name}-{uuid.uuid4().hex[:8]}"
+            signature = getattr(part, "thought_signature", None)
+            meta = {"thought_signature": signature} if signature is not None else {}
             tool_calls.append(
-                ToolCall(id=call_id, name=fc.name, arguments=dict(fc.args or {}))
+                ToolCall(id=call_id, name=fc.name, arguments=dict(fc.args or {}), meta=meta)
             )
 
     usage_meta = getattr(resp, "usage_metadata", None)

@@ -83,36 +83,111 @@ Requires Python 3.10+.
 
 ## Sixty-second example
 
+The example below wires up Gemini, but nothing here is Gemini-specific —
+swap `provider="gemini"` for `"anthropic"` or `"openai"` and every other
+line stays the same (see [Configuring the LLM by
+config](#configuring-the-llm-by-config) for the full provider list and what
+"bring your own model" actually means today).
+
+**1. Give it something to work on.** The prompt below references
+`data/sales.csv` — that file isn't shipped with `governed`; it's a
+placeholder path *you* provide. Either point the prompt at a real file, or
+drop in this minimal one so the example runs as-is:
+
 ```python
-from governed import Agent, AgentConfig, Budget, JSONFileStore
-from governed.llm import AnthropicClient
+from pathlib import Path
+Path("workspace/data").mkdir(parents=True, exist_ok=True)
+Path("workspace/data/sales.csv").write_text(
+    "order_id,region,revenue\n1,East,1200\n2,West,900\n3,North,450\n"
+)
+```
+
+**2. Run it.**
+
+```python
+import os
+from governed import Agent, AgentConfig, Budget, JSONFileStore, LLMConfig
 
 agent = Agent(AgentConfig(
-    llm=AnthropicClient(model="claude-sonnet-4-6"),
+    llm=LLMConfig(provider="gemini", model="gemini-2.5-flash",
+                  api_key=os.environ["GEMINI_API_KEY"]),
     workspace="./workspace",              # the agent cannot write outside this
     skills_dirs=["./skills"],
     budget=Budget(max_iterations=12, max_tokens=200_000),
     store=JSONFileStore(".governed/sessions"),
-    trace_path="./traces/run.jsonl",
+    trace_path="./traces/run.jsonl",      # turns the durable event trace ON; omit to skip it
 ))
 
 result = agent.run(
     "Profile data/sales.csv, then report the top 3 regions by revenue. "
     "Write the findings to report.md."
 )
+```
 
-print(result.status)        # complete | partial | blocked | failed | exhausted | cancelled
-print(result.confidence)    # the model's own calibration, 0.0-1.0
-print(result.answer)
-print(result.unmet_requirements)   # what it admits it didn't do
+**3. Read the result.** `RunResult` is a structured object, not a string —
+`submit` is a *tool* with a schema, so a run cannot end without the model
+declaring all of this. This is the whole object, not a curated subset:
 
-# Crashed halfway? Pick up where it stopped.
+```python
+print(result.status)              # complete | partial | blocked | failed | exhausted | cancelled
+print(result.confidence)          # the model's own calibration, 0.0-1.0
+print(result.answer)              # the model's final answer text
+print(result.evidence)            # tool outputs it's citing to back that answer
+print(result.unmet_requirements)  # what it admits it didn't do
+print(result.iterations, result.total_tokens, result.cost_usd, result.duration_s)
+print(result.session_id)          # key into JSONFileStore -- for resume() and later lookups
+```
+
+`result.cost_usd` is accurate for Anthropic and OpenAI models. **For Gemini
+it currently always reads `$0.0000`** — `governed`'s rate card has no
+Gemini entries yet (tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md)), not
+because Gemini is free. A `COST_WARNING` event fires once to say so; pass
+`CostConfig(pricing_overrides={...})` (§8) if you need real numbers today.
+
+**4. Find the actual deliverable.** `report.md` is not printed anywhere —
+the agent wrote it with the `file_system` tool, inside your workspace:
+`./workspace/report.md`. `result.answer` is the model's *summary* of what it
+did, not the output itself; anything the goal asked it to produce or write
+lives in the workspace, not in `RunResult`.
+
+**5. Turn the trace into something readable.** Setting `trace_path` above
+already wrote every plan, tool call, and self-evaluation to
+`./traces/run.jsonl` as the run happened — there is no separate "turn trace
+on" step. Rendering it to a readable narrative is a second, manual call you
+make yourself, whenever you want it — `agent.run()` never does this for you:
+
+```python
+from governed import trace_to_markdown
+Path("traces/run.md").write_text(trace_to_markdown("traces/run.jsonl"))
+```
+
+**6. Get a compliance-facing summary.** Same idea as the trace, different
+shape: cost, iterations, human approvals, and the final outcome, without the
+play-by-play detail. This is also a call you make yourself, and it's cheap —
+it reads state `agent`/`result` already collected, it doesn't re-run
+anything or ask the model for a self-report:
+
+```python
+from governed import build_audit_report
+Path("traces/run-audit.md").write_text(build_audit_report(agent, result).to_markdown())
+```
+
+Trace vs. audit: the trace is the play-by-play (what the model saw and
+reasoned at every step, failures included); the audit is the box score (did
+it finish, what did it cost, was anything gated). Neither is
+tamper-evident — that's a separate, heavier feature, off by default: see
+[§5a, the decision ledger](#5a-the-decision-ledger-tamper-evident-and-exportable).
+
+**7. Crashed halfway?** Pick up where it stopped:
+
+```python
 agent.resume(result.session_id)
 ```
 
-`RunResult` is a structured object, not a string. `submit` is a *tool* with a
-schema, so a run cannot end without the model declaring a status, a confidence,
-its evidence, and anything it failed to do.
+**8. Add your own tools.** `file_system`, `execute_code`, `analyze_data`,
+`scratchpad`, and `submit` ship by default — see [Adding a
+tool](#adding-a-tool) for how to write and register your own (one class, one
+`run()` method).
 
 ---
 
@@ -149,6 +224,14 @@ LLMConfig(provider="anthropic", model="claude-sonnet-5",  api_key=..., base_url=
 LLMConfig(provider="openai",    model="gpt-4.1",           api_key=..., base_url=None)
 LLMConfig(provider="gemini",    model="gemini-2.5-flash",  api_key=..., base_url=None)
 ```
+
+**That's the complete list of what ships today.** Three first-class
+providers, plus anything that already speaks OpenAI's wire format via
+`OpenAIClient(base_url=...)` (vLLM, Ollama, Together, LM Studio). There is
+no generic, protocol-level "point this at any model" adapter yet — a fourth
+real provider means writing a fourth `LLMClient` (below), not a config
+flag. That gap is tracked, not silently missing: see
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Behind the scenes, `governed.llm.factory.resolve_llm` maps `provider` to a
 builder function that lazily imports the vendor SDK and constructs the
@@ -993,6 +1076,15 @@ waiting for the library. An unrecognised model is counted as **$0.00 and warned
 about once**, loudly, because a silent zero is the failure mode that matters. It
 is not an error: a model behind `OpenAIClient(base_url="http://localhost:8000")`
 genuinely costs nothing per token, and pretending otherwise would be worse.
+
+**Gemini is currently one of those unrecognised cases, always.** The rate
+card has Anthropic and OpenAI entries but no `gemini-*` entry at all yet —
+every Gemini run's `cost_usd` reads `$0.0000` today, not because the model
+is free, but because nobody's added its rates. This is a real, tracked gap
+(see [`docs/ROADMAP.md`](docs/ROADMAP.md)), not a design choice like the
+self-hosted case above. Pass `CostConfig(pricing_overrides={...})` with
+Gemini's current published rates if you need real cost numbers before that
+lands.
 
 **Recursive context pruning.** At 75% of the window (`compaction_for(model)`
 derives both from the rate card), old turns fold into a rolling summary.

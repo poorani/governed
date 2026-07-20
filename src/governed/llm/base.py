@@ -29,6 +29,9 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    #: Provider-specific round-trip data (e.g. Gemini's ``thought_signature``)
+    #: that must be echoed back verbatim on a later turn. Opaque to the core.
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

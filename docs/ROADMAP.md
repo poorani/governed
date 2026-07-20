@@ -42,6 +42,20 @@ than none.
   `governed contributors`, 2026 — asked and confirmed: kept generic rather
   than naming an individual, to be revisited if/when others contribute.
 
+- **Gemini has no entry in the pricing table.** `PRICING` in
+  `memory/optimizer.py` covers Anthropic and OpenAI models but not one
+  `gemini-*` model — `resolve_pricing("gemini-2.5-flash")` (or any other
+  Gemini model) returns `None`, so every Gemini run's `cost_usd` reads
+  `$0.0000` and the cost circuit breaker (`Budget.max_usd`) cannot protect
+  it, no matter how much is actually spent. This isn't silent (the
+  once-per-model `COST_WARNING` event fires, per `agent.py:331-337`, and
+  the audit report surfaces the same `$0.0000`), but it means anyone
+  running Gemini through `governed` today needs
+  `CostConfig(pricing_overrides={"gemini-...": ModelPricing(...)})` just to
+  get real numbers — not documented as a required step anywhere. Cheap fix:
+  add current Gemini rates to `PRICING`, same shape as the existing
+  Anthropic/OpenAI entries, and note the `PRICING_AS_OF` check date.
+
 - **Wire SIGTERM the way Ctrl-C (SIGINT) already is.** `cli.py`'s
   `_install_cancel_on_sigint` only handles `SIGINT`. A process manager
   (systemd, Kubernetes, most container orchestrators) sends `SIGTERM` on
@@ -78,6 +92,22 @@ than none.
   Anthropic/OpenAI/Gemini SDKs all have async clients available) or an
   adapter layer; a real design decision, not a quick patch. Worth scoping
   before starting.
+
+- **Only three first-class LLM providers; no generic/protocol-level
+  adapter.** Today, supporting a new model means one of two things: it's
+  Anthropic, OpenAI (or an OpenAI-compatible endpoint via `base_url` — vLLM,
+  Ollama, Together, LM Studio all work today, since they speak the OpenAI
+  wire format), or Gemini — the only three shipped `LLMClient`
+  implementations — or someone hand-writes a fourth adapter class and calls
+  `register_provider` (one `complete()` method; see [Bringing your own
+  LLM](../README.md#bringing-your-own-llm)). There's no protocol-level
+  adapter that could talk to an arbitrary model given just a base URL and a
+  wire-format hint, the way, say, a generic OpenAI-compatible client
+  already halfway does for self-hosted models. Worth scoping: is the real
+  gap "more vendor SDKs bundled in" (cheap, mechanical, one file each) or
+  "a declarative schema for describing a new provider's request/response
+  shape without writing Python" (a real design problem)? Flagged here
+  rather than fixed because that scoping question hasn't been answered.
 
 - **No rate limiting or quota system.** Nothing in the framework bounds
   concurrent runs, per-tenant spend, or request rate — `Budget` and

@@ -184,6 +184,142 @@ def test_complete_tolerates_missing_usage_metadata() -> None:
 
 
 # ---------------------------------------------------------------------------
+# GeminiClient.complete -- retry on transient transport errors
+#
+# The agent loop (agent.py's _with_retries) only retries ContractViolation,
+# never transport errors, so a Gemini 503/429 would otherwise kill the whole
+# run -- this is the client's own safety net.
+# ---------------------------------------------------------------------------
+
+
+def _flaky_gemini_sdk(exc_sequence: list[Exception], text: str = "ok") -> SimpleNamespace:
+    response = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(parts=[SimpleNamespace(text=text, function_call=None)])
+            )
+        ],
+        usage_metadata=SimpleNamespace(prompt_token_count=1, candidates_token_count=1),
+    )
+    calls = {"n": 0}
+
+    def generate_content(**_: Any) -> SimpleNamespace:
+        i = calls["n"]
+        calls["n"] += 1
+        if i < len(exc_sequence):
+            raise exc_sequence[i]
+        return response
+
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+    client.calls = calls  # type: ignore[attr-defined]
+    return client
+
+
+def test_complete_does_not_retry_a_non_transient_error() -> None:
+    """No `google-genai` install needed: a plain exception (stands in for any
+    non-ServerError/ClientError failure) is never retryable, regardless of
+    max_retries."""
+    fake = _flaky_gemini_sdk([RuntimeError("boom")])
+    client = GeminiClient(client=fake, max_retries=3)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        client.complete(system="sys", messages=[Message(role="user", text="hi")])
+    assert fake.calls["n"] == 1  # type: ignore[attr-defined]
+
+
+def test_complete_retries_on_server_error_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors = pytest.importorskip("google.genai.errors")
+    sleeps: list[float] = []
+    monkeypatch.setattr(sys.modules["time"], "sleep", lambda s: sleeps.append(s))
+
+    fake = _flaky_gemini_sdk(
+        [
+            errors.ServerError(503, {"message": "overloaded", "status": "UNAVAILABLE"}),
+            errors.ServerError(503, {"message": "overloaded", "status": "UNAVAILABLE"}),
+        ]
+    )
+    client = GeminiClient(client=fake, max_retries=2, retry_backoff=1.0)
+
+    resp = client.complete(system="sys", messages=[Message(role="user", text="hi")])
+
+    assert resp.text == "ok"
+    assert fake.calls["n"] == 3  # type: ignore[attr-defined]
+    assert sleeps == [1.0, 2.0]  # exponential backoff
+
+
+def test_complete_raises_after_exhausting_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    errors = pytest.importorskip("google.genai.errors")
+    monkeypatch.setattr(sys.modules["time"], "sleep", lambda _s: None)
+
+    def make() -> Exception:
+        return errors.ServerError(503, {"message": "overloaded", "status": "UNAVAILABLE"})
+
+    fake = _flaky_gemini_sdk([make(), make(), make()])
+    client = GeminiClient(client=fake, max_retries=2)
+
+    with pytest.raises(errors.ServerError):
+        client.complete(system="sys", messages=[Message(role="user", text="hi")])
+    assert fake.calls["n"] == 3  # type: ignore[attr-defined]
+
+
+def test_complete_retries_a_429_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    errors = pytest.importorskip("google.genai.errors")
+    monkeypatch.setattr(sys.modules["time"], "sleep", lambda _s: None)
+
+    fake = _flaky_gemini_sdk(
+        [errors.ClientError(429, {"message": "rate limited", "status": "RESOURCE_EXHAUSTED"})]
+    )
+    client = GeminiClient(client=fake, max_retries=1)
+
+    resp = client.complete(system="sys", messages=[Message(role="user", text="hi")])
+    assert resp.text == "ok"
+
+
+def test_complete_does_not_retry_a_400_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    errors = pytest.importorskip("google.genai.errors")
+    monkeypatch.setattr(sys.modules["time"], "sleep", lambda _s: None)
+
+    fake = _flaky_gemini_sdk(
+        [errors.ClientError(400, {"message": "bad request", "status": "INVALID_ARGUMENT"})]
+    )
+    client = GeminiClient(client=fake, max_retries=3)
+
+    with pytest.raises(errors.ClientError):
+        client.complete(system="sys", messages=[Message(role="user", text="hi")])
+    assert fake.calls["n"] == 1  # type: ignore[attr-defined]
+
+
+def test_max_retries_zero_disables_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    errors = pytest.importorskip("google.genai.errors")
+    monkeypatch.setattr(sys.modules["time"], "sleep", lambda _s: None)
+
+    fake = _flaky_gemini_sdk(
+        [errors.ServerError(503, {"message": "overloaded", "status": "UNAVAILABLE"})]
+    )
+    client = GeminiClient(client=fake, max_retries=0)
+
+    with pytest.raises(errors.ServerError):
+        client.complete(system="sys", messages=[Message(role="user", text="hi")])
+    assert fake.calls["n"] == 1  # type: ignore[attr-defined]
+
+
+def test_retry_settings_are_configurable_via_constructor() -> None:
+    fake = _fake_gemini_sdk("ok")
+    client = GeminiClient(client=fake, max_retries=5, retry_backoff=0.1)
+    assert client.max_retries == 5
+    assert client.retry_backoff == 0.1
+
+
+def test_retry_settings_default_to_a_couple_of_quick_attempts() -> None:
+    fake = _fake_gemini_sdk("ok")
+    client = GeminiClient(client=fake)
+    assert client.max_retries == 2
+    assert client.retry_backoff == 1.0
+
+
+# ---------------------------------------------------------------------------
 # _to_gemini_tools
 # ---------------------------------------------------------------------------
 
@@ -197,6 +333,34 @@ def test_to_gemini_tools_wraps_every_tool_in_one_function_declarations_block() -
     assert len(out) == 1
     names = [fd["name"] for fd in out[0]["function_declarations"]]
     assert names == ["a", "b"]
+
+
+def test_to_gemini_tools_strips_additional_properties_at_every_depth() -> None:
+    """The Gemini REST API rejects `additionalProperties` nested inside an
+    `anyOf` branch -- reproduces the shape pydantic generates for a
+    `dict[str, str] | None` field (e.g. DataAnalysisTool's `agg`)."""
+    tools = [
+        {
+            "name": "analyze_data",
+            "description": "d",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "agg": {
+                        "anyOf": [
+                            {"type": "object", "additionalProperties": {"type": "string"}},
+                            {"type": "null"},
+                        ],
+                    }
+                },
+            },
+        }
+    ]
+    out = _to_gemini_tools(tools)
+    params = out[0]["function_declarations"][0]["parameters"]
+    any_of = params["properties"]["agg"]["anyOf"]
+    assert "additionalProperties" not in any_of[0]
+    assert any_of[0] == {"type": "object"}
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +384,31 @@ def test_to_gemini_contents_assistant_with_tool_calls() -> None:
     assert out[0]["role"] == "model"
     assert out[0]["parts"] == [
         {"function_call": {"id": "c1", "name": "search", "args": {"q": "x"}}}
+    ]
+
+
+def test_to_gemini_contents_replays_thought_signature_on_function_call() -> None:
+    """Gemini's "thinking" models reject a replayed function_call that's
+    missing the thought_signature from the turn that produced it (400
+    INVALID_ARGUMENT) -- it must round-trip through ToolCall.meta."""
+    msg = Message(
+        role="assistant",
+        text="",
+        tool_calls=[
+            ToolCall(
+                id="c1",
+                name="search",
+                arguments={"q": "x"},
+                meta={"thought_signature": b"sig"},
+            )
+        ],
+    )
+    out = _to_gemini_contents([msg])
+    assert out[0]["parts"] == [
+        {
+            "function_call": {"id": "c1", "name": "search", "args": {"q": "x"}},
+            "thought_signature": b"sig",
+        }
     ]
 
 
@@ -314,3 +503,33 @@ def test_from_gemini_response_concatenates_multiple_text_parts() -> None:
     )
     out = _from_gemini_response(resp)
     assert out.text == "hello world"
+
+
+def test_from_gemini_response_captures_thought_signature_into_tool_call_meta() -> None:
+    fc = SimpleNamespace(id="c1", name="search", args={"q": "x"})
+    resp = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[
+                        SimpleNamespace(text=None, function_call=fc, thought_signature=b"sig")
+                    ]
+                )
+            )
+        ],
+        usage_metadata=SimpleNamespace(prompt_token_count=1, candidates_token_count=1),
+    )
+    out = _from_gemini_response(resp)
+    assert out.tool_calls[0].meta == {"thought_signature": b"sig"}
+
+
+def test_from_gemini_response_tolerates_missing_thought_signature() -> None:
+    """Parts built via `_fake_gemini_sdk` (and older SDK responses) have no
+    `thought_signature` attribute at all -- must not raise."""
+    fc = SimpleNamespace(id="c1", name="search", args={})
+    fake = _fake_gemini_sdk(function_calls=[fc])
+    client = GeminiClient(client=fake)
+
+    resp = client.complete(system="sys", messages=[Message(role="user", text="hi")])
+
+    assert resp.tool_calls[0].meta == {}
