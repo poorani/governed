@@ -1,14 +1,25 @@
-![governed](https://raw.githubusercontent.com/poorani/governed/main/assets/governed_lockup.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/poorani/governed/main/assets/governed_lockup.png" alt="governed" width="440">
+</p>
 
-# governed
+<p align="center">
+  A small, explicit framework for goal-directed LLM agents.
+</p>
 
-A small, explicit framework for goal-directed LLM agents.
+<p align="center">
+  <a href="https://pypi.org/project/governed/"><img src="https://img.shields.io/pypi/v/governed.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/governed/"><img src="https://img.shields.io/pypi/pyversions/governed.svg" alt="Python versions"></a>
+  <a href="https://github.com/poorani/governed/actions/workflows/ci.yml"><img src="https://github.com/poorani/governed/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+</p>
 
-Most agent frameworks give the model a bag of tools and a `while` loop, then hope
-it behaves. `governed` makes each step of the loop a **contract the model must
-satisfy before it is allowed to proceed**. It has to write a plan before it can
-touch a tool, and it has to evaluate the result — citing evidence — before it can
-plan again. Violations aren't crashes; they're fed back as corrections.
+---
+
+Most agent frameworks give the model a bag of tools and a while loop, then hope
+it behaves. governed makes each step of the loop a contract the model must
+satisfy before it is allowed to proceed. It has to write a plan before it can
+touch a tool, and it has to evaluate the result, citing evidence, before it can
+plan again. Violations are not crashes. They are fed back as corrections.
 
 The result is an agent whose every action is traceable to a stated reason, and a
 trace you can read afterwards to find out exactly what happened and why.
@@ -24,6 +35,20 @@ ANALYZE ──▶ ACT ──▶ EXECUTE ──▶ OBSERVE ──┐
 
 One runtime dependency (`pydantic`). No vendor lock-in. ~2,000 lines you can read
 in an afternoon.
+
+## Status
+
+governed is early and moving fast. The core loop, the built-in tools, the
+guardrails, the decision ledger, and the provider clients are all implemented
+and covered by an offline test suite. What it has not had yet is real production
+mileage. Treat it as a solid, readable foundation to build on and experiment
+with, not a finished, hardened system.
+
+If you hit rough edges at this stage, that is expected. Issues and pull requests
+are very welcome, and the roadmap below lists what is still missing and what is
+coming next.
+
+Tested on Python 3.10, 3.11, and 3.12 with the offline test suite.
 
 ---
 
@@ -73,6 +98,7 @@ From source:
 
 ```bash
 git clone https://github.com/poorani/governed && cd governed
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 pytest
 ```
@@ -1602,6 +1628,7 @@ you can.
 Issues and PRs welcome. Before submitting:
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 ruff check . && ruff format --check .
 mypy src
