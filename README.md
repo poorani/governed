@@ -122,6 +122,7 @@ drop in this minimal one so the example runs as-is:
 
 ```python
 from pathlib import Path
+
 Path("workspace/data").mkdir(parents=True, exist_ok=True)
 Path("workspace/data/sales.csv").write_text(
     "order_id,region,revenue\n1,East,1200\n2,West,900\n3,North,450\n"
@@ -134,15 +135,18 @@ Path("workspace/data/sales.csv").write_text(
 import os
 from governed import Agent, AgentConfig, Budget, JSONFileStore, LLMConfig
 
-agent = Agent(AgentConfig(
-    llm=LLMConfig(provider="gemini", model="gemini-2.5-flash",
-                  api_key=os.environ["GEMINI_API_KEY"]),
-    workspace="./workspace",              # the agent cannot write outside this
-    skills_dirs=["./skills"],
-    budget=Budget(max_iterations=12, max_tokens=200_000),
-    store=JSONFileStore(".governed/sessions"),
-    trace_path="./traces/run.jsonl",      # turns the durable event trace ON; omit to skip it
-))
+agent = Agent(
+    AgentConfig(
+        llm=LLMConfig(
+            provider="gemini", model="gemini-2.5-flash", api_key=os.environ["GEMINI_API_KEY"]
+        ),
+        workspace="./workspace",  # the agent cannot write outside this
+        skills_dirs=["./skills"],
+        budget=Budget(max_iterations=12, max_tokens=200_000),
+        store=JSONFileStore(".governed/sessions"),
+        trace_path="./traces/run.jsonl",  # turns the durable event trace ON; omit to skip it
+    )
+)
 
 result = agent.run(
     "Profile data/sales.csv, then report the top 3 regions by revenue. "
@@ -155,13 +159,13 @@ result = agent.run(
 declaring all of this. This is the whole object, not a curated subset:
 
 ```python
-print(result.status)              # complete | partial | blocked | failed | exhausted | cancelled
-print(result.confidence)          # the model's own calibration, 0.0-1.0
-print(result.answer)              # the model's final answer text
-print(result.evidence)            # tool outputs it's citing to back that answer
+print(result.status)  # complete | partial | blocked | failed | exhausted | cancelled
+print(result.confidence)  # the model's own calibration, 0.0-1.0
+print(result.answer)  # the model's final answer text
+print(result.evidence)  # tool outputs it's citing to back that answer
 print(result.unmet_requirements)  # what it admits it didn't do
 print(result.iterations, result.total_tokens, result.cost_usd, result.duration_s)
-print(result.session_id)          # key into JSONFileStore -- for resume() and later lookups
+print(result.session_id)  # key into JSONFileStore -- for resume() and later lookups
 ```
 
 `result.cost_usd` is accurate for Anthropic and OpenAI models. **For Gemini
@@ -184,6 +188,7 @@ make yourself, whenever you want it — `agent.run()` never does this for you:
 
 ```python
 from governed import trace_to_markdown
+
 Path("traces/run.md").write_text(trace_to_markdown("traces/run.jsonl"))
 ```
 
@@ -195,6 +200,7 @@ anything or ask the model for a self-report:
 
 ```python
 from governed import build_audit_report
+
 Path("traces/run-audit.md").write_text(build_audit_report(agent, result).to_markdown())
 ```
 
@@ -229,15 +235,17 @@ right adapter itself; the caller never imports `AnthropicClient`,
 import os
 from governed import Agent, AgentConfig, LLMConfig
 
-agent = Agent(AgentConfig(
-    llm=LLMConfig(
-        provider="openai",                       # or "anthropic", "gemini"
-        model="gpt-4.1",
-        api_key=os.environ["OPENAI_API_KEY"],
-        base_url=None,                            # or a self-hosted endpoint
-    ),
-    workspace="./workspace",
-))
+agent = Agent(
+    AgentConfig(
+        llm=LLMConfig(
+            provider="openai",  # or "anthropic", "gemini"
+            model="gpt-4.1",
+            api_key=os.environ["OPENAI_API_KEY"],
+            base_url=None,  # or a self-hosted endpoint
+        ),
+        workspace="./workspace",
+    )
+)
 ```
 
 This is the whole point: `provider`/`model`/`api_key` can come from a config
@@ -246,9 +254,9 @@ editing that data — no code change, no new import. The two lines that differ
 between Anthropic, OpenAI, and Gemini are `provider` and `model`:
 
 ```python
-LLMConfig(provider="anthropic", model="claude-sonnet-5",  api_key=..., base_url=None)
-LLMConfig(provider="openai",    model="gpt-4.1",           api_key=..., base_url=None)
-LLMConfig(provider="gemini",    model="gemini-2.5-flash",  api_key=..., base_url=None)
+LLMConfig(provider="anthropic", model="claude-sonnet-5", api_key=..., base_url=None)
+LLMConfig(provider="openai", model="gpt-4.1", api_key=..., base_url=None)
+LLMConfig(provider="gemini", model="gemini-2.5-flash", api_key=..., base_url=None)
 ```
 
 **That's the complete list of what ships today.** Three first-class
@@ -556,7 +564,7 @@ agent = Agent(AgentConfig(llm=AnthropicClient()))
 thread = threading.Thread(target=lambda: print(agent.run("...")))
 thread.start()
 ...
-agent.cancel("operator requested stop")   # thread-safe
+agent.cancel("operator requested stop")  # thread-safe
 thread.join()
 ```
 
@@ -578,10 +586,10 @@ A tool is four class attributes, one Pydantic model, one method:
 ```python
 class Tool(ABC):
     name: str
-    description: str          # written for the model to read
-    safety: ToolSafety        # READ_ONLY | MUTATES_STATE | EXECUTES_CODE | NETWORK
+    description: str  # written for the model to read
+    safety: ToolSafety  # READ_ONLY | MUTATES_STATE | EXECUTES_CODE | NETWORK
     returns: str
-    Input: type[BaseModel]    # doubles as the JSON Schema sent to the LLM
+    Input: type[BaseModel]  # doubles as the JSON Schema sent to the LLM
 
     def run(self, args: Input, ctx: ToolContext) -> ToolResult: ...
 ```
@@ -717,6 +725,7 @@ JSONL, afterwards — and this is the part that matters:
 
 ```python
 from governed import trace_to_markdown
+
 print(trace_to_markdown("traces/run.jsonl"))
 ```
 
@@ -738,11 +747,15 @@ from governed import AgentConfig, HttpEventSink, OTelEventSink, EventType
 AgentConfig(
     llm=...,
     subscribers=[
-        HttpEventSink("https://http-inputs-<host>.splunkcloud.com/services/collector",
-                       headers={"Authorization": "Splunk <hec-token>"}),
+        HttpEventSink(
+            "https://http-inputs-<host>.splunkcloud.com/services/collector",
+            headers={"Authorization": "Splunk <hec-token>"},
+        ),
         # event_types scopes down what ships -- everything, by default.
-        OTelEventSink("https://otel-collector.internal:4318",
-                       event_types={EventType.TOOL_CALL, EventType.RUN_END}),
+        OTelEventSink(
+            "https://otel-collector.internal:4318",
+            event_types={EventType.TOOL_CALL, EventType.RUN_END},
+        ),
     ],
 )
 ```
@@ -766,22 +779,33 @@ iteration (plan, rationale, selected tool, safety checks, evaluation
 evidence), plus a guaranteed final record however the run ends.
 
 ```python
-from governed import AgentConfig, DecisionLedgerConfig, JSONLDecisionLedger, HttpDecisionLedgerSink, OTelDecisionLedgerSink
+from governed import (
+    AgentConfig,
+    DecisionLedgerConfig,
+    JSONLDecisionLedger,
+    HttpDecisionLedgerSink,
+    OTelDecisionLedgerSink,
+)
 
-agent = Agent(AgentConfig(
-    llm=...,
-    decision_ledger=DecisionLedgerConfig(
-        enabled=True,                                     # off by default
-        store=JSONLDecisionLedger("./ledgers/run.jsonl"),  # the append-only registry
-        sinks=[
-            HttpDecisionLedgerSink(splunk_or_datadog_or_newrelic_url, headers={...}),
-            OTelDecisionLedgerSink(otel_collector_endpoint),  # OTLP/HTTP, no SDK dependency
-        ],
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=...,
+        decision_ledger=DecisionLedgerConfig(
+            enabled=True,  # off by default
+            store=JSONLDecisionLedger("./ledgers/run.jsonl"),  # the append-only registry
+            sinks=[
+                HttpDecisionLedgerSink(splunk_or_datadog_or_newrelic_url, headers={...}),
+                OTelDecisionLedgerSink(
+                    otel_collector_endpoint
+                ),  # OTLP/HTTP, no SDK dependency
+            ],
+        ),
+    )
+)
 result = agent.run("...")
 
 from governed import verify_chain
+
 verify_chain(agent.decision_ledger.store.read(result.state.run_id))  # raises on tampering
 ```
 
@@ -867,8 +891,13 @@ write yourself —
 ```python
 def push_to_statsd(event):
     if event.type is EventType.TOOL_RESULT:
-        statsd.timing(f"governed.tool.{event.data['tool']}.latency_ms", event.data["duration_ms"])
-        statsd.increment(f"governed.tool.{event.data['tool']}.{'ok' if event.data['ok'] else 'error'}")
+        statsd.timing(
+            f"governed.tool.{event.data['tool']}.latency_ms", event.data["duration_ms"]
+        )
+        statsd.increment(
+            f"governed.tool.{event.data['tool']}.{'ok' if event.data['ok'] else 'error'}"
+        )
+
 
 agent = Agent(AgentConfig(llm=..., subscribers=[telemetry, push_to_statsd]))
 ```
@@ -906,12 +935,14 @@ arguments, and swept by deterministic scanners.
 ```python
 from governed import Agent, AgentConfig, GuardrailConfig, AllowTierApprover, RiskTier
 
-agent = Agent(AgentConfig(
-    llm=AnthropicClient(),
-    guardrails=GuardrailConfig(
-        approver=AllowTierApprover(RiskTier.WARNING),   # unattended: no deletes, no shell
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=AnthropicClient(),
+        guardrails=GuardrailConfig(
+            approver=AllowTierApprover(RiskTier.WARNING),  # unattended: no deletes, no shell
+        ),
+    )
+)
 ```
 
 Approvers are `(ApprovalRequest) -> ApprovalDecision`. Four ship: `TerminalApprover`
@@ -1009,21 +1040,27 @@ reference providers (`KeywordSafetyProvider`, zero dependencies;
 
 ```python
 from governed import (
-    AgentConfig, GuardrailConfig, ContentSafetyScanner, LLMSafetyProvider, CategoryPolicy,
+    AgentConfig,
+    GuardrailConfig,
+    ContentSafetyScanner,
+    LLMSafetyProvider,
+    CategoryPolicy,
 )
 from governed.security.content_safety import BIAS
 
-agent = Agent(AgentConfig(
-    llm=...,
-    guardrails=GuardrailConfig(
-        content_safety_scanners=[
-            ContentSafetyScanner(
-                LLMSafetyProvider(cheap_classifier_llm),
-                category_policies={BIAS: CategoryPolicy("escalate", RiskTier.WARNING)},
-            ),
-        ],
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=...,
+        guardrails=GuardrailConfig(
+            content_safety_scanners=[
+                ContentSafetyScanner(
+                    LLMSafetyProvider(cheap_classifier_llm),
+                    category_policies={BIAS: CategoryPolicy("escalate", RiskTier.WARNING)},
+                ),
+            ],
+        ),
+    )
+)
 ```
 
 It plugs into the exact same `Scanner` protocol and `Gateway.screen_call`
@@ -1049,19 +1086,21 @@ scratch:
 ```python
 from governed import Agent, AgentConfig, GovernancePolicy, ProviderPolicy, RiskTier
 
-agent = Agent(AgentConfig(
-    llm=LLMConfig(provider="anthropic", model="claude-sonnet-5", api_key=...),
-    tools=[FileSystemTool(), DataAnalysisTool(), SubmitTool()],
-    governance=GovernancePolicy(
-        allowed_tools=frozenset({"file_system", "analyze_data", "submit"}),
-        sensitive_operations=frozenset({"file_system:delete"}),
-        approval_threshold=RiskTier.WARNING,
-    ),
-    provider_policy=ProviderPolicy(
-        allowed_providers=frozenset({"anthropic"}),
-        allowed_models={"anthropic": frozenset({"claude-sonnet-5"})},
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=LLMConfig(provider="anthropic", model="claude-sonnet-5", api_key=...),
+        tools=[FileSystemTool(), DataAnalysisTool(), SubmitTool()],
+        governance=GovernancePolicy(
+            allowed_tools=frozenset({"file_system", "analyze_data", "submit"}),
+            sensitive_operations=frozenset({"file_system:delete"}),
+            approval_threshold=RiskTier.WARNING,
+        ),
+        provider_policy=ProviderPolicy(
+            allowed_providers=frozenset({"anthropic"}),
+            allowed_models={"anthropic": frozenset({"claude-sonnet-5"})},
+        ),
+    )
+)
 ```
 
 A tool outside `allowed_tools`, or a provider/model outside `ProviderPolicy`,
@@ -1125,8 +1164,8 @@ exceed the budget, summarises *those*, to `max_depth`.
 ```python
 AgentConfig(
     llm=client,
-    compaction=compaction_for(client.model),   # 75% of the model's real window
-    recursive_compaction=True,                 # default
+    compaction=compaction_for(client.model),  # 75% of the model's real window
+    recursive_compaction=True,  # default
 )
 ```
 
@@ -1143,9 +1182,9 @@ survive an eight-hour run, the agent has to say so out loud.
 AgentConfig(
     llm=client,
     circuit_breaker=CircuitBreakerConfig(
-        max_usd=2.00,                    # the one that matters. Set it.
-        max_identical_tool_calls=4,      # same tool, byte-identical args
-        max_stalled_iterations=4,        # same (step, tool), no step completed
+        max_usd=2.00,  # the one that matters. Set it.
+        max_identical_tool_calls=4,  # same tool, byte-identical args
+        max_stalled_iterations=4,  # same (step, tool), no step completed
     ),
 )
 ```
@@ -1182,7 +1221,15 @@ interlock on purpose.
 
 ```python
 from pydantic import BaseModel, Field
-from governed import Tool, ToolContext, ToolResult, ToolSafety, ToolExecutionError, ToolErrorCode
+from governed import (
+    Tool,
+    ToolContext,
+    ToolResult,
+    ToolSafety,
+    ToolExecutionError,
+    ToolErrorCode,
+)
+
 
 class HttpGetTool(Tool):
     name = "http_get"
@@ -1190,7 +1237,7 @@ class HttpGetTool(Tool):
         "Fetch a URL over HTTPS and return the body as text. Public, read-only "
         "endpoints only. The body is truncated to 20k characters."
     )
-    safety = ToolSafety.NETWORK        # routes through the approval gate
+    safety = ToolSafety.NETWORK  # routes through the approval gate
     returns = "HTTP status code followed by the response body."
 
     class Input(BaseModel):
@@ -1212,6 +1259,7 @@ Register it:
 
 ```python
 from governed import default_tools
+
 config = AgentConfig(llm=..., tools=[*default_tools(), HttpGetTool()])
 ```
 
@@ -1221,7 +1269,8 @@ see [Plugin registries](#config-first-bootstrapping):
 
 ```python
 from governed import register_tool
-register_tool("http_get", HttpGetTool)   # HttpGetTool() must take no args
+
+register_tool("http_get", HttpGetTool)  # HttpGetTool() must take no args
 ```
 
 ```yaml
@@ -1266,11 +1315,20 @@ Implement one method.
 ```python
 from governed.llm import LLMClient, LLMResponse, Message, ToolCall, Usage
 
+
 class MyClient(LLMClient):
     model = "my-model-v1"
 
-    def complete(self, *, system, messages, tools=None,
-                 tool_choice="auto", max_tokens=4096, temperature=0.0) -> LLMResponse:
+    def complete(
+        self,
+        *,
+        system,
+        messages,
+        tools=None,
+        tool_choice="auto",
+        max_tokens=4096,
+        temperature=0.0,
+    ) -> LLMResponse:
         ...
         return LLMResponse(text=..., tool_calls=[...], usage=Usage(in_, out))
 ```
@@ -1302,50 +1360,45 @@ See [Configuring the LLM by config](#configuring-the-llm-by-config).
 
 ```python
 AgentConfig(
-    llm,                                   # required. An LLMClient, or an
-                                            # LLMConfig(provider=, model=, ...)
-                                            # -- see "Configuring the LLM by config"
-    workspace="./workspace",               # sandbox root; created if absent
-    tools=None,                            # None → default_tools(skills)
+    llm,  # required. An LLMClient, or an
+    # LLMConfig(provider=, model=, ...)
+    # -- see "Configuring the LLM by config"
+    workspace="./workspace",  # sandbox root; created if absent
+    tools=None,  # None → default_tools(skills)
     skills_dirs=["./skills"],
-    skills=None,                           # or pass a SkillLibrary directly
-
+    skills=None,  # or pass a SkillLibrary directly
     budget=Budget(
         max_iterations=20,
         max_tokens=500_000,
         max_tool_calls=100,
         max_wall_seconds=900.0,
-        max_consecutive_failures=3,        # abort a doom loop
-        max_contract_retries=2,            # per phase, per iteration
+        max_consecutive_failures=3,  # abort a doom loop
+        max_contract_retries=2,  # per phase, per iteration
     ),
     tool_timeout_s=60.0,
-
-    approval_policy="never",               # "never" | "dangerous" | "always"
-    approval_fn=auto_approve,              # or cli_approve, deny_all, your own
+    approval_policy="never",  # "never" | "dangerous" | "always"
+    approval_fn=auto_approve,  # or cli_approve, deny_all, your own
     # guardrails=GuardrailConfig(...),     # supersedes approval_policy -- see "Guardrails"
     # governance=GovernancePolicy(...),    # allowed tools, sensitive ops, approval
     #                                      # threshold -- see "Governance: deployment-wide policy"
     # provider_policy=ProviderPolicy(...), # allowed providers/models -- see
     #                                      # "Configuring the LLM by config"
-
-    store=InMemoryStore(),                 # or JSONFileStore(...), or yours
+    store=InMemoryStore(),  # or JSONFileStore(...), or yours
     compaction=CompactionConfig(
         trigger_ratio=0.7,
         context_window_tokens=180_000,
         keep_iterations=3,
     ),
     checkpoint_every_iteration=True,
-
-    trace_path=None,                       # JSONL sink
+    trace_path=None,  # JSONL sink
     console=True,
     verbose=False,
-    subscribers=[],                        # your own Event handlers
+    subscribers=[],  # your own Event handlers
     # decision_ledger=DecisionLedgerConfig(...),  # tamper-evident, exportable --
     #                                              # off by default -- see "The decision ledger"
-
     max_tokens_per_call=4096,
     temperature=0.0,
-    extra_instructions="",                 # appended to the system prompt
+    extra_instructions="",  # appended to the system prompt
 )
 ```
 
@@ -1475,15 +1528,17 @@ your tools, and your failure handling with zero API calls and zero flake.
 from governed import Agent, AgentConfig, ScriptedClient, LLMResponse
 from governed.llm import ToolCall
 
-client = ScriptedClient([
-    LLMResponse(text='<plan>{...}</plan>'),
-    LLMResponse(tool_calls=[ToolCall("c1", "file_system", {...})]),
-    LLMResponse(text='<evaluation>{...}</evaluation>'),
-])
+client = ScriptedClient(
+    [
+        LLMResponse(text="<plan>{...}</plan>"),
+        LLMResponse(tool_calls=[ToolCall("c1", "file_system", {...})]),
+        LLMResponse(text="<evaluation>{...}</evaluation>"),
+    ]
+)
 result = Agent(AgentConfig(llm=client, console=False)).run("...")
 
 assert result.ok
-assert client.calls[0]["tool_names"] == []   # tools withheld during ANALYZE
+assert client.calls[0]["tool_names"] == []  # tools withheld during ANALYZE
 ```
 
 `examples/03_offline_scripted.py` runs the full loop offline, deliberately

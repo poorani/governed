@@ -100,15 +100,15 @@ policy = GovernancePolicy(
     # This deployment may only ever have these tools, regardless of what
     # AgentConfig(tools=...) tries to register. `submit` is always implicit.
     allowed_tools=frozenset({"file_system", "analyze_data", "submit"}),
-
     # Named operations that must always require a human, however the built-in
     # risk tiers would otherwise classify them. Format matches RiskPolicy's
     # discriminator convention: "tool" or "tool:operation".
     sensitive_operations=frozenset({"file_system:delete"}),
-
     # This deployment runs unattended up to WARNING; DANGER always stops.
     approval_threshold=RiskTier.WARNING,
-    approver=AllowTierApprover(RiskTier.WARNING),  # or TerminalApprover(), WebhookApprover(...)
+    approver=AllowTierApprover(
+        RiskTier.WARNING
+    ),  # or TerminalApprover(), WebhookApprover(...)
 )
 
 agent = Agent(AgentConfig(llm=..., tools=[...], governance=policy))
@@ -180,7 +180,10 @@ action -- a tool call's arguments, or the result it produced -- for
 ```python
 from governed import GuardrailConfig, ContentSafetyScanner, CategoryPolicy
 from governed.security.content_safety import (
-    HARMFUL_INTENT, POLICY_VIOLATION, BIAS, UNSAFE_BEHAVIOR,
+    HARMFUL_INTENT,
+    POLICY_VIOLATION,
+    BIAS,
+    UNSAFE_BEHAVIOR,
 )
 
 guardrails = GuardrailConfig(
@@ -203,6 +206,7 @@ guardrails = GuardrailConfig(
 ```python
 class SafetyProvider(Protocol):
     name: str
+
     def evaluate(self, text: str, *, source: str) -> SafetyVerdict: ...
 ```
 
@@ -290,10 +294,10 @@ EXECUTE → OBSERVE separation legible after the fact:
 ```python
 result = agent.run("...")
 for it in result.state.iterations:
-    it.plan          # {"goal_restatement", "steps", "next_action": {"tool", "rationale", "success_criteria", ...}}
-    it.tool_calls     # [ToolCallRecord(tool, arguments, rationale, ok, result_preview, error_code, ...)]
-    it.evaluation     # {"outcome", "evidence", "goal_status", "next_step", ...}
-    it.violations     # contract violations raised and corrected within this iteration
+    it.plan  # {"goal_restatement", "steps", "next_action": {"tool", "rationale", "success_criteria", ...}}
+    it.tool_calls  # [ToolCallRecord(tool, arguments, rationale, ok, result_preview, error_code, ...)]
+    it.evaluation  # {"outcome", "evidence", "goal_status", "next_step", ...}
+    it.violations  # contract violations raised and corrected within this iteration
 ```
 
 The **plan is not inferred** -- it's the model's own structured commitment,
@@ -319,17 +323,21 @@ previous record's hash:
 ```python
 from governed import AgentConfig, DecisionLedgerConfig, JSONLDecisionLedger
 
-agent = Agent(AgentConfig(
-    llm=...,
-    decision_ledger=DecisionLedgerConfig(
-        enabled=True,                                    # off by default
-        store=JSONLDecisionLedger("./ledgers/run.jsonl"), # or InMemoryDecisionLedger(), or your own
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=...,
+        decision_ledger=DecisionLedgerConfig(
+            enabled=True,  # off by default
+            store=JSONLDecisionLedger(
+                "./ledgers/run.jsonl"
+            ),  # or InMemoryDecisionLedger(), or your own
+        ),
+    )
+)
 result = agent.run("...")
 
 records = agent.decision_ledger.store.read(result.state.run_id)
-verify_chain(records)          # raises TamperDetected on the first altered/reordered/deleted entry
+verify_chain(records)  # raises TamperDetected on the first altered/reordered/deleted entry
 ```
 
 **Edit, delete, or reorder any entry and every hash from that point forward
@@ -367,8 +375,10 @@ DecisionLedgerConfig(
         # Splunk HEC / Datadog logs intake / New Relic Log API / Dynatrace
         # ingest API all accept arbitrary structured JSON over HTTP with an
         # auth header -- point this at whichever one your deployment uses.
-        HttpDecisionLedgerSink("https://http-inputs-<host>.splunkcloud.com/...",
-                                headers={"Authorization": "Splunk <hec-token>"}),
+        HttpDecisionLedgerSink(
+            "https://http-inputs-<host>.splunkcloud.com/...",
+            headers={"Authorization": "Splunk <hec-token>"},
+        ),
         # OTLP/HTTP, hand-built against the documented wire format -- no
         # opentelemetry-sdk dependency. Point it at a Collector, or directly
         # at any backend with native OTLP ingestion (all four vendors above
@@ -403,7 +413,7 @@ Configurable per run, all optional, all composable:
 AgentConfig(
     ...,
     trace_path="./traces/run.jsonl",  # JSONLSink: append-only, canonical record
-    console=True,                     # ConsoleSink: terse running commentary
+    console=True,  # ConsoleSink: terse running commentary
     verbose=False,
     subscribers=[my_datadog_subscriber, LoggingSink()],  # anything: Event -> None
 )
@@ -447,13 +457,15 @@ config"](../README.md#configuring-the-llm-by-config):
 ```python
 from governed import Agent, AgentConfig, LLMConfig, ProviderPolicy
 
-agent = Agent(AgentConfig(
-    llm=LLMConfig(provider="anthropic", model="claude-sonnet-5", api_key=...),
-    provider_policy=ProviderPolicy(
-        allowed_providers=frozenset({"anthropic"}),
-        allowed_models={"anthropic": frozenset({"claude-sonnet-5", "claude-haiku-4-5"})},
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=LLMConfig(provider="anthropic", model="claude-sonnet-5", api_key=...),
+        provider_policy=ProviderPolicy(
+            allowed_providers=frozenset({"anthropic"}),
+            allowed_models={"anthropic": frozenset({"claude-sonnet-5", "claude-haiku-4-5"})},
+        ),
+    )
+)
 ```
 
 `ProviderPolicy` is checked by `resolve_llm` *before* an adapter is

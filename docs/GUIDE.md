@@ -157,10 +157,18 @@ escalate refunds and account deletions to a human.
 
 ```python
 from governed import (
-    Agent, AgentConfig, Budget, GuardrailConfig, RiskPolicy, RiskTier,
-    WebhookApprover, CircuitBreakerConfig, TelemetryCollector,
+    Agent,
+    AgentConfig,
+    Budget,
+    GuardrailConfig,
+    RiskPolicy,
+    RiskTier,
+    WebhookApprover,
+    CircuitBreakerConfig,
+    TelemetryCollector,
 )
 from governed.llm import AnthropicClient
+
 
 # Refunds and account changes escalate no matter what tool touches them --
 # this is a custom escalation rule layered on top of the built-in tiers.
@@ -170,18 +178,21 @@ def escalate_money_and_deletions(spec, args) -> RiskTier | None:
         return RiskTier.DANGER
     return None
 
+
 telemetry = TelemetryCollector()
-agent = Agent(AgentConfig(
-    llm=AnthropicClient(model="claude-sonnet-5"),
-    workspace="./support_workspace",
-    guardrails=GuardrailConfig(
-        risk_policy=RiskPolicy(escalations=[escalate_money_and_deletions]),
-        approver=WebhookApprover("https://hooks.internal/support-approvals"),
-    ),
-    budget=Budget(max_iterations=10),
-    circuit_breaker=CircuitBreakerConfig(max_usd=0.50),   # per ticket
-    subscribers=[telemetry],
-))
+agent = Agent(
+    AgentConfig(
+        llm=AnthropicClient(model="claude-sonnet-5"),
+        workspace="./support_workspace",
+        guardrails=GuardrailConfig(
+            risk_policy=RiskPolicy(escalations=[escalate_money_and_deletions]),
+            approver=WebhookApprover("https://hooks.internal/support-approvals"),
+        ),
+        budget=Budget(max_iterations=10),
+        circuit_breaker=CircuitBreakerConfig(max_usd=0.50),  # per ticket
+        subscribers=[telemetry],
+    )
+)
 
 result = agent.run("Triage ticket #48213 and draft or send a reply.")
 ```
@@ -225,21 +236,28 @@ touch anything outside the intake folder.
 
 ```python
 from governed import (
-    Agent, AgentConfig, GuardrailConfig, AllowTierApprover, RiskTier, default_tools,
+    Agent,
+    AgentConfig,
+    GuardrailConfig,
+    AllowTierApprover,
+    RiskTier,
+    default_tools,
 )
 
-agent = Agent(AgentConfig(
-    llm=AnthropicClient(model="claude-sonnet-5"),
-    workspace="./intake",                      # the sandbox boundary
-    tools=default_tools(include_code_execution=False),  # no shell, ever
-    guardrails=GuardrailConfig(
-        approver=AllowTierApprover(RiskTier.WARNING),   # never delete, never shell out
-    ),
-    extra_instructions=(
-        "Flag any invoice where the line-item total does not match the "
-        "stated total, or where the vendor is not in vendors.csv."
-    ),
-))
+agent = Agent(
+    AgentConfig(
+        llm=AnthropicClient(model="claude-sonnet-5"),
+        workspace="./intake",  # the sandbox boundary
+        tools=default_tools(include_code_execution=False),  # no shell, ever
+        guardrails=GuardrailConfig(
+            approver=AllowTierApprover(RiskTier.WARNING),  # never delete, never shell out
+        ),
+        extra_instructions=(
+            "Flag any invoice where the line-item total does not match the "
+            "stated total, or where the vendor is not in vendors.csv."
+        ),
+    )
+)
 ```
 
 With `execute_code` left out of `tools`, this agent physically cannot run a
@@ -384,6 +402,7 @@ def push_to_statsd(event):
         name = event.data["tool"]
         statsd.timing(f"governed.tool.{name}.latency_ms", event.data["duration_ms"])
         statsd.increment(f"governed.tool.{name}.{'ok' if event.data['ok'] else 'error'}")
+
 
 agent = Agent(AgentConfig(llm=..., subscribers=[telemetry, push_to_statsd]))
 ```
